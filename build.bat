@@ -18,3 +18,4 @@ if "%DEBUG%" == "0" (
 
 @echo on
 cl %CLOPTS% UDPdisplay.c
+cl %CLOPTS% UDPsource.c
