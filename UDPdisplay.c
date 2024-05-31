@@ -23,8 +23,9 @@
 
 #include "UDPcommon.h"
 
-double* x = NULL;
-BOOL paused = FALSE;
+double* x = NULL;  
+int nskip = 10; // only write from input thread
+BOOL paused = FALSE; // only write from input thread
 
 #define PAUSE_MSG "!!!!!!!!!!!!!!!!!!!! PAUSED  !!!!!!!!!!!!!!!!!!!!!"
 #define RUN_MSG   "-------------------- RUNNING ---------------------"
@@ -84,6 +85,10 @@ void __cdecl handleInput(void* in)
       } else if (inp == KEY_x) {
         GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
         break;
+      } else if (inp == '+') {
+        nskip = __min(200, (nskip+1));
+      } else if (inp == '-') {
+        nskip = __max(1, (nskip-1));
       }
     }
     Sleep(20);
@@ -160,7 +165,6 @@ int main(void)
   // handle input in a different thread
   _beginthread(&handleInput, 2048, NULL);
 
-  int nskip = 10;
   printf_s("Press <space> to pause.  Press `x` to quit.  Press `+` or `-` to display speed.\n");
   while (TRUE) {
     // need to read all data off socket, even if we can't show it
@@ -168,6 +172,7 @@ int main(void)
     if (inCleanup) break;
  
     printf_s("\x1b[1G\x1b[3d"); // bring cursor back to top
+    printf_s("Displaying every %d packet\n", nskip);
     if (!paused) {
       printf(RUN_MSG "\n");
       for (int j = 0; j < NUMX; j++) {  
