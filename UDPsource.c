@@ -13,25 +13,17 @@
 #include <time.h>
 #include <winsock2.h>
 
+#include "UDPcommon.h"
+
 #pragma comment(lib, "Ws2_32.lib")
 
-// number of doubles in buffer
-const size_t NUMX = 200;
+// control progress bar printing
+#define NPRINT 50
+#define NLINE 80
+
+double* x; // buffer of doubles
 const clock_t DT = CLOCKS_PER_SEC/100; // 100 Hz
 const int MAX_SEND = 3600*100; // 1 hours worth of packets
-
-const char SENDADDR[] = "127.0.0.1"; // send to myself for now
-const u_short SENDPORT = 41952;
-
-// more accurate sleep function at these times
-// quite resource heavy, but it's just for testing
-// the display code
-void mysleep(clock_t wait)
-{
-  clock_t clockTarget = clock() + wait;
-  while(clockTarget > clock()) { }
-  return;
-}
 
 // get data from UDP packet
 // early template generates data in place.
@@ -42,6 +34,26 @@ void generate_data(double* x1, int i)
   for (int j = 1; j < NUMX; j++) {
     x1[j] = sin(t + j*3.14159/NUMX);
   }
+}
+
+// erase console line, assuming we only write to 80 chars
+// leave back at start of line
+void clear_line() {
+  printf_s("\r");
+  for (int j = 0; j < NLINE; j++) printf_s(" ");
+  printf_s("\r");
+}
+
+BOOL inCleanup = FALSE;
+BOOL __stdcall cleanup(DWORD dwCtrlType)
+{
+  (void) dwCtrlType; // unused
+  inCleanup = TRUE;
+  free(x);
+  WSACleanup();
+  clear_line();
+  printf_s("\n");
+  return FALSE; // let any other handlers run
 }
 
 int main(void)
@@ -60,6 +72,7 @@ int main(void)
     printf_s("Socket creation failed: %d\n", WSAGetLastError());
     return EXIT_FAILURE;
   }
+  
 
   // create address to send data
   struct sockaddr_in dest;
@@ -70,9 +83,29 @@ int main(void)
   int destlen = sizeof(struct sockaddr_in);
 
   // make a buffer to hold data
-  double* x = calloc(NUMX, sizeof(double));
+  x = calloc(NUMX, sizeof(double));
   int nbytes = (int) NUMX*sizeof(double);
+
+  // attempt to cleanup on ctrl-c
+  if (!SetConsoleCtrlHandler(&cleanup, TRUE)) return GetLastErrorAndPrint();
+
+  // Main loop, wait and send packets
+  printf_s("Sending test UDP packets to %s: %hu\n", SENDADDR, SENDPORT);
+  printf_s("Press Ctrl-C to exit\n");
+  clock_t clockLast = clock();
+  clock_t clockNext = clockLast;
   for (int i = 0; i < MAX_SEND; i++) {
+
+    // really inefficient sleep, but best timing
+    // timing stays at 10 msec regardless of how long everything else takes
+    clockNext = clockLast + DT;
+    while (clockNext > clock()) {}
+    clockLast = clockNext;
+
+    // make sure this thread pauses while Ctrl-C cleanup is executed 
+    // in another thread
+    if (inCleanup) continue;
+
     // generate data
     generate_data(x, i);
     
@@ -82,13 +115,10 @@ int main(void)
       printf_s("Error calling sendto: %d\n", result);
       break;
     }
-
-    // sleep
-    mysleep(DT);
-
     // print progress
-    if (i % 100 == 0) printf_s(".");
-    if (i % 6000 == 0) printf_s("\n");
+    if (i % NPRINT == 0) printf_s(".");
+    if (i % (NPRINT*NLINE) == 0) clear_line();
+    
   }
 
   free(x);

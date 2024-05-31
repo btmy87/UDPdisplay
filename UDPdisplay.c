@@ -10,7 +10,8 @@
 #include <process.h>
 #include <conio.h>
 
-#define NUMX 200
+#include "UDPcommon.h"
+
 double* x = NULL;
 BOOL paused = FALSE;
 
@@ -18,21 +19,6 @@ BOOL paused = FALSE;
 #define RUN_MSG   "-------------------- RUNNING ---------------------"
 #define PAUSE_COLOR "\x1b[41m"
 #define RESET_COLOR "\x1b[0m"
-
-// helper function for windows errors
-DWORD GetLastErrorAndPrint() {
-  DWORD out = GetLastError();
-  //LPCVOID lpSource = NULL;
-  LPSTR lpBuffer = NULL; 
-
-  DWORD dwFlags = FORMAT_MESSAGE_ALLOCATE_BUFFER 
-                  | FORMAT_MESSAGE_FROM_SYSTEM;
-  FormatMessage(dwFlags, NULL, out, LANG_SYSTEM_DEFAULT,
-    (LPSTR)&lpBuffer, 0, NULL);
-  printf("ErrCode: %d\n", out);
-  printf("ErrMsg : %s\n", lpBuffer);
-  return out;
-}
 
 // get data from UDP packet
 // early template generates data in place.
