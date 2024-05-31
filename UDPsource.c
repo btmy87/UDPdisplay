@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <winsock2.h>
+#include <synchapi.h>
 
 #include "UDPcommon.h"
 
@@ -99,7 +100,8 @@ int main(void)
     // really inefficient sleep, but best timing
     // timing stays at 10 msec regardless of how long everything else takes
     clockNext = clockLast + DT;
-    while (clockNext > clock()) {}
+    Sleep(__max(clockNext-clock(), 0));
+    //while (clockNext > clock()) {}
     clockLast = clockNext;
 
     // make sure this thread pauses while Ctrl-C cleanup is executed 

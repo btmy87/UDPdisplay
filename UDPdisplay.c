@@ -1,6 +1,14 @@
 // display live data from UDP packets
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+
+// TODO: should probably update
+#define _WINSOCK_DEPRECATED_NO_WARNINGS 
+
 #include <stdio.h>
+#include <stdlib.h>
 #include <wchar.h>
 #include <windows.h>
 #include <winnt.h>
@@ -9,6 +17,9 @@
 #include <synchapi.h>
 #include <process.h>
 #include <conio.h>
+#include <winsock2.h>
+
+#pragma comment(lib, "Ws2_32.lib")
 
 #include "UDPcommon.h"
 
@@ -22,13 +33,25 @@ BOOL paused = FALSE;
 
 // get data from UDP packet
 // early template generates data in place.
-void get_data(double* x1, int i)
+void get_data(double* x1, SOCKET sock)
 {
-  double t = 0.01*i;
-  x1[0] = t;
-  for (int j = 1; j < NUMX; j++) {
-    x1[j] = sin(t + j*3.14159/NUMX);
+  const int nbytesExpected = NUMX*sizeof(double);
+  int nbytes = recv(sock, (char*)x1, nbytesExpected, 0);
+  if (nbytes == SOCKET_ERROR) {
+    printf_s("Error during recv: %d\n", nbytes);
+    GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
+  } else if (nbytes != nbytesExpected) {
+    printf_s("Received %d bytes, expected %d bytes\n", 
+      nbytes, nbytesExpected);
   }
+}
+
+void reset_console()
+{
+  printf("\n");
+  printf("\x1b[!p"); // reset stuff
+  printf("\x1b[?1049l"); // back to normal screen buffer
+  printf("\n"); // force buffer to flush
 }
 
 // register a handler so we can cleanup after a ctrl C
@@ -41,12 +64,10 @@ BOOL __stdcall cleanup(DWORD dwCtrlType)
 {
   //dwCtrlType; // don't need dwCtrlType
   inCleanup = TRUE;
-  printf("\n");
-  printf("\x1b[!p"); // reset stuff
-  printf("\x1b[?1049l"); // back to normal screen buffer
-  printf("\n"); // force buffer to flush
+  reset_console();
   if (dwCtrlType < 7) printf("Received ctrl signal: %d\n", dwCtrlType);
   free(x);
+  WSACleanup();
   return FALSE; // let any other handlers run
 }
 
@@ -70,47 +91,94 @@ void __cdecl handleInput(void* in)
   _endthread();
 }
 
+DWORD setup_console(void)
+{
+  // first we need to enable vt processing
+  HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+  if (hOut == INVALID_HANDLE_VALUE) return FALSE;
+    
+  DWORD dwMode = 0;
+  if (!GetConsoleMode(hOut, &dwMode)) return FALSE;
+
+  dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+  if (!SetConsoleMode(hOut, dwMode)) return FALSE;
+  
+  printf_s("\x1b[?1049h"); // switch to alternate buffer
+  printf_s("\x1b[?25l"); // hide the cursor
+
+  // things are good
+  return TRUE;
+}
+
+SOCKET setup_socket()
+{
+  // setup winsock
+  WSADATA wsaData;
+  int wsaStartupResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
+  if (wsaStartupResult != 0) {
+    printf_s("WSA Startup Failed: %d\n", wsaStartupResult);
+    return (SOCKET) SOCKET_ERROR;
+  }
+
+  // create socket
+  SOCKET sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  if (sock == SOCKET_ERROR) {
+    printf_s("Socket creation failed: %d\n", WSAGetLastError());
+    WSACleanup();
+    return (SOCKET) SOCKET_ERROR;
+  }
+
+  // bind socket
+  SOCKADDR_IN addr;
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(SENDPORT);
+  addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  if (bind(sock, (SOCKADDR *)&addr, sizeof(addr)) == SOCKET_ERROR) {
+    printf_s("Error binding socket.\n");
+    WSACleanup();
+    return (SOCKET) SOCKET_ERROR;
+  }
+  printf_s("Listening for UDP packets on port %hu.\n", SENDPORT);
+
+  return sock;
+}
+
 int main(void)
 {
 
-  // first we need to enable vt processing
-  HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-  if (hOut == INVALID_HANDLE_VALUE) return GetLastErrorAndPrint();
-    
-  DWORD dwMode = 0;
-  if (!GetConsoleMode(hOut, &dwMode)) return GetLastErrorAndPrint();
+  if (!setup_console()) return GetLastErrorAndPrint();
 
-  dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-  if (!SetConsoleMode(hOut, dwMode)) return GetLastErrorAndPrint();
+  SOCKET sock = setup_socket();
+  if (sock == SOCKET_ERROR) {
+    reset_console();
+    return EXIT_FAILURE;
+  } 
 
   x = malloc(NUMX*sizeof(double));
-  printf("\x1b[?1049h"); // switch to alternate buffer
-  printf("\x1b[?25l"); // hide the cursor
   if (!SetConsoleCtrlHandler(&cleanup, TRUE)) return GetLastErrorAndPrint();
 
   // handle input in a different thread
   _beginthread(&handleInput, 2048, NULL);
 
-
   int nskip = 10;
-  for (int i = 0; i < 10000; i+=nskip) {
-    get_data(x, i);
+  printf_s("Press <space> to pause.  Press `x` to quit.  Press `+` or `-` to display speed.\n");
+  while (TRUE) {
+    // need to read all data off socket, even if we can't show it
+    for (int i = 0; i < nskip; i++) get_data(x, sock);
     if (inCleanup) break;
  
-    printf("\x1b[1G\x1b[0d"); 
+    printf_s("\x1b[1G\x1b[3d"); // bring cursor back to top
     if (!paused) {
       printf(RUN_MSG "\n");
       for (int j = 0; j < NUMX; j++) {  
         if (j % 5 == 0) {
-          printf("\r\n");
+          printf_s("\r\n");
         }
-        printf("x[%3d]=%8.4f  ", j, x[j]);
+        printf_s("x[%3d]=%8.4f  ", j, x[j]);
       }
     } else {
       printf(PAUSE_COLOR PAUSE_MSG RESET_COLOR "\n");
     }
-    Sleep(10*nskip);
-
   }
   if (!inCleanup) cleanup(7);
   return 0;
