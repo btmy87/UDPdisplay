@@ -26,7 +26,7 @@
 double* x = NULL;  // data buffer
 HANDLE xMutex; // mutex to control access to data
 
-DWORD dtDisplay = 100;
+DWORD dtDisplay = 200;
 BOOL paused = FALSE; // only write from input thread
 SOCKET sock = (SOCKET) SOCKET_ERROR;
 
@@ -127,7 +127,7 @@ void __cdecl handleUserInput(void* in)
         }
       } else if (inp == '-') {
         if (dtDisplay <= 520) {
-          dtDisplay = __max(0, (dtDisplay-20));
+          dtDisplay = __max(20, (dtDisplay-20));
         } else {
           dtDisplay -= 100;
         }
@@ -220,14 +220,45 @@ void print_double(char* buf, char* dispName, int width, int precision,
                   double lowLimit, double lowWarn,
                   double highLimit, double highWarn) {
   double val = *( (double*) buf);
-  int formatColor = 0;
-  if (val <= lowLimit) { formatColor = 44;} // blue background
-  else if (val <= lowWarn) {formatColor = 94;} // blue text
-  else if (val >= highLimit) {formatColor = 41;} // red background
-  else if (val >= highWarn) {formatColor = 33;} // yellow text
-  printf_s("%s= " ESC "[%dm%*.*f" ESC "[0m  ", dispName, formatColor, width, precision, val);
-  (void) formatColor;
-  //printf_s("%s= %*.*f  ", dispName, width, precision, val);
+  // calc color based on degree into limit
+  double wf = 0.2; // fraction of color to jump to at warning level
+  const int LR = 0;  // values at full low limit
+  const int LG = 80;
+  const int LB = 133;
+  const int HR = 152;
+  const int HG = 58;
+  const int HB = 18;
+  
+  // don't color between limits
+  if (val > lowWarn && val < highWarn) {
+    printf_s("%s= %*.*f  ", dispName, width, precision, val);
+    return;
+  }
+  int R = 0;
+  int G = 0;
+  int B = 0;
+  double cf = 0.0;
+  if (val < lowWarn) {
+    cf = wf + (1.0-wf)*(lowWarn - val)/(lowWarn - lowLimit);
+    cf = __min(cf, 1.0);
+    R = lround(LR*cf);
+    G = lround(LG*cf);
+    B = lround(LB*cf);
+  } else {
+    // must be > highWarn
+    cf = wf + (1.0-wf)*(val - highWarn)/(highLimit - highWarn);
+    cf = __min(cf, 1.0);
+    R = lround(HR*cf);
+    G = lround(HG*cf);
+    B = lround(HB*cf);
+  }
+  if (val < lowLimit || val > highLimit) {
+    printf_s(ESC "[4m" "%s= " ESC "[48;2;%d;%d;%dm" "%*.*f" ESC "[0m  " ,
+      dispName, R, G, B, width, precision, val);
+  } else {
+    printf_s("%s= " ESC "[48;2;%d;%d;%dm" "%*.*f" ESC "[0m  " ,
+      dispName, R, G, B, width, precision, val);
+  }
 }
 
 int main(void)
