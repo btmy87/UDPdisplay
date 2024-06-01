@@ -120,12 +120,20 @@ void __cdecl handleUserInput(void* in)
         GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
         break;
       } else if (inp == '+') {
-        dtDisplay = __min(5000, (dtDisplay+10));
+        if (dtDisplay <= 480) {
+          dtDisplay += 20;
+        } else {
+          dtDisplay = __min(5000, (dtDisplay+100));
+        }
       } else if (inp == '-') {
-        dtDisplay = __max(10, (dtDisplay-10));
+        if (dtDisplay <= 520) {
+          dtDisplay = __max(20, (dtDisplay-20));
+        } else {
+          dtDisplay -= 100;
+        }
       }
     }
-    Sleep(20);
+    //Sleep(20);
   }
   _endthread();
 }
@@ -256,22 +264,29 @@ int main(void)
   char runIndicator[] = {'|', '/', '-', '\\'};
   while (TRUE) {
     if (inCleanup) break;
+
+    // sleep until next update, but want to update
+    // display frequence faster so we appear responsive
     nextClock = lastClock + dtDisplay;
-    DWORD dtSleep = __max(0, (nextClock - clock()));
-    Sleep(dtSleep);
+    while (nextClock > clock()) {
+      DWORD dtSleep = __max(0, (nextClock - clock()));
+      dtSleep = __min(dtSleep, 50);
+      Sleep(dtSleep);
+      
+      // can print some stuff without the data mutex
+      // this helps us feel better that stuff is running
+      printf_s(ESC "[3;1H"); // set cursor position
+      printf_s("Display updates every %4d ms\n", dtDisplay);
+      if (paused) {
+        printf(PAUSE_COLOR PAUSE_MSG RESET_COLOR "\n");
+        continue;
+      }
+      iRun = (iRun + 1) % 4;
+      printf(RUN_MSG " %c\n", runIndicator[iRun]);
+    }
     lastClock = nextClock;
 
-    // can print some stuff without the data mutex
-    // this helps us feel better that stuff is running
-    //printf_s(ESC "[1G" ESC "[3d"); // bring cursor back to top
-    printf_s(ESC "[3;1H"); // set cursor position
-    printf_s("Display updates every %d ms\n", dtDisplay);
-    if (paused) {
-      printf(PAUSE_COLOR PAUSE_MSG RESET_COLOR "\n");
-      continue;
-    }
-    iRun = (iRun + 1) % 4;
-    printf(RUN_MSG " %c\n", runIndicator[iRun]);
+
 
     // wait for data mutex
     DWORD waitResult = WaitForSingleObject(xMutex, dtDisplay);    
