@@ -29,6 +29,11 @@ HANDLE xMutex; // mutex to control access to data
 DWORD dtDisplay = 200;
 BOOL paused = FALSE; // only write from input thread
 SOCKET sock = (SOCKET) SOCKET_ERROR;
+struct sockaddr_in srcaddr;
+int srcaddrLen = sizeof(srcaddr);
+__time32_t recvClock;
+struct tm recvTime;
+char recvTimeStr[26] = "                         ";
 
 #define PAUSE_MSG "!!!!!!!!!!!!!!!!!!!! PAUSED  !!!!!!!!!!!!!!!!!!!!!"
 #define RUN_MSG   "-------------------- RUNNING ---------------------"
@@ -76,7 +81,8 @@ void reset_console()
 void get_data()
 {
   const int nbytesExpected = NUMX*sizeof(double);
-  int nbytes = recv(sock, (char*)x, nbytesExpected, 0);
+  int nbytes = recvfrom(sock, (char*)x, nbytesExpected, 0, 
+                        (struct sockaddr*) &srcaddr, &srcaddrLen);
   if (nbytes == SOCKET_ERROR) {
     reset_console();
     printf_s("Error during recv:\n");
@@ -86,6 +92,7 @@ void get_data()
     printf_s("Received %d bytes, expected %d bytes\n", 
       nbytes, nbytesExpected);
   }
+  _time32(&recvClock); // save the time we got the last message
 }
 
 
@@ -323,8 +330,12 @@ int main(void)
       
       // can print some stuff without the data mutex
       // this helps us feel better that stuff is running
-      printf_s(ESC "[3;1H"); // set cursor position
+      printf_s(ESC "[4;1H"); // set cursor position
       printf_s("Display updates every %4d ms\n", dtDisplay);
+      _localtime32_s( &recvTime, &recvClock);
+      asctime_s(recvTimeStr, 26, &recvTime);
+      printf_s("Last message from: %15s at %25s\n",
+        inet_ntoa(srcaddr.sin_addr), recvTimeStr);
       if (paused) {
         printf(PAUSE_COLOR PAUSE_MSG RESET_COLOR "\n");
         continue;
