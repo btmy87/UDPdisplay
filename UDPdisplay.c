@@ -23,23 +23,64 @@
 
 #include "UDPcommon.h"
 
-double* x = NULL;  
-int nskip = 10; // only write from input thread
+double* x = NULL;  // data buffer
+HANDLE xMutex; // mutex to control access to data
+
+DWORD dtDisplay = 100;
 BOOL paused = FALSE; // only write from input thread
+SOCKET sock = (SOCKET) SOCKET_ERROR;
 
 #define PAUSE_MSG "!!!!!!!!!!!!!!!!!!!! PAUSED  !!!!!!!!!!!!!!!!!!!!!"
 #define RUN_MSG   "-------------------- RUNNING ---------------------"
+#define ESC "\x1b"
 #define PAUSE_COLOR "\x1b[41m"
 #define RESET_COLOR "\x1b[0m"
 
+DWORD setup_console(void)
+{
+  // first we need to enable vt processing
+  HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+  if (hOut == INVALID_HANDLE_VALUE) return FALSE;
+    
+  DWORD dwMode = 0;
+  if (!GetConsoleMode(hOut, &dwMode)) return FALSE;
+
+  dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+  if (!SetConsoleMode(hOut, dwMode)) return FALSE;
+  
+  printf_s(ESC "7"); // save cursor position
+  printf_s(ESC "[?1049h"); // switch to alternate buffer
+  printf_s(ESC "[?25l"); // hide the cursor
+  printf_s(ESC "[1;1H"); // set cursor position
+
+  // things are good
+  return TRUE;
+}
+
+// Ideally, we'll reset the console before printing any
+// error message.  But we need to make sure we only do this once.
+BOOL consoleReset = FALSE;
+void reset_console()
+{
+  if (!consoleReset) {
+    printf_s("\n");
+    printf_s(ESC "[?25h"); // show cursor
+    printf_s(ESC "[?1049l"); // back to normal screen buffer
+    printf_s(ESC "8"); // reset cursor position
+    printf_s("\n"); // force buffer to flush
+    consoleReset = TRUE;
+  }
+}
+
 // get data from UDP packet
-// early template generates data in place.
-void get_data(double* x1, SOCKET sock)
+void get_data()
 {
   const int nbytesExpected = NUMX*sizeof(double);
-  int nbytes = recv(sock, (char*)x1, nbytesExpected, 0);
+  int nbytes = recv(sock, (char*)x, nbytesExpected, 0);
   if (nbytes == SOCKET_ERROR) {
-    printf_s("Error during recv: %d\n", nbytes);
+    reset_console();
+    printf_s("Error during recv:\n");
+    WSAGetLastErrorAndPrint();
     GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
   } else if (nbytes != nbytesExpected) {
     printf_s("Received %d bytes, expected %d bytes\n", 
@@ -47,13 +88,6 @@ void get_data(double* x1, SOCKET sock)
   }
 }
 
-void reset_console()
-{
-  printf("\n");
-  printf("\x1b[!p"); // reset stuff
-  printf("\x1b[?1049l"); // back to normal screen buffer
-  printf("\n"); // force buffer to flush
-}
 
 // register a handler so we can cleanup after a ctrl C
 // since this runs in a different thread, we use the
@@ -68,27 +102,27 @@ BOOL __stdcall cleanup(DWORD dwCtrlType)
   reset_console();
   if (dwCtrlType < 7) printf("Received ctrl signal: %d\n", dwCtrlType);
   free(x);
+  CloseHandle(xMutex);
+  closesocket(sock);
   WSACleanup();
   return FALSE; // let any other handlers run
 }
 
-const int KEY_SPACE = ' ';
-const int KEY_x = 'x'; 
-void __cdecl handleInput(void* in)
+void __cdecl handleUserInput(void* in)
 {
   (void) in; // unused parameter
   while (TRUE) {
     if (_kbhit()) {
       int inp = _getch();
-      if (inp == KEY_SPACE) {
+      if (inp == ' ') {
         paused = paused ? FALSE : TRUE; // toggle paused
-      } else if (inp == KEY_x) {
+      } else if (inp == 'x') {
         GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
         break;
       } else if (inp == '+') {
-        nskip = __min(200, (nskip+1));
+        dtDisplay = __min(5000, (dtDisplay+10));
       } else if (inp == '-') {
-        nskip = __max(1, (nskip-1));
+        dtDisplay = __max(10, (dtDisplay-10));
       }
     }
     Sleep(20);
@@ -96,39 +130,62 @@ void __cdecl handleInput(void* in)
   _endthread();
 }
 
-DWORD setup_console(void)
+void __cdecl handleUDPInput(void* in)
 {
-  // first we need to enable vt processing
-  HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-  if (hOut == INVALID_HANDLE_VALUE) return FALSE;
-    
-  DWORD dwMode = 0;
-  if (!GetConsoleMode(hOut, &dwMode)) return FALSE;
+  (void) in; // unused parameter
+  while (TRUE) {
+    // wait until we can get data Mutex
+    DWORD waitResult = WaitForSingleObject(xMutex, INFINITE);
 
-  dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-  if (!SetConsoleMode(hOut, dwMode)) return FALSE;
-  
-  printf_s("\x1b[?1049h"); // switch to alternate buffer
-  printf_s("\x1b[?25l"); // hide the cursor
+    // get the data
+    if (waitResult == WAIT_OBJECT_0) {
+      get_data();
+    } else if (waitResult == WAIT_ABANDONED) {
+      reset_console();
+      if (!ReleaseMutex(xMutex)) GetLastErrorAndPrint();
+      printf_s("Error in UDP thread getting mutex, WAIT_ABANDONED\n");
+      GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
+      break;
+    } else if (waitResult == WAIT_FAILED) {
+      reset_console();
+      if (!ReleaseMutex(xMutex)) GetLastErrorAndPrint();
+      printf_s("Error in UDP thread getting mutex, WAIT_FAILED\n");
+      GetLastErrorAndPrint();
+      GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
+      break;
+    }
 
-  // things are good
-  return TRUE;
+    // release the Mutex
+    if (!ReleaseMutex(xMutex)) {
+      reset_console();
+      printf_s("Error releasing mutex\n");
+      GetLastErrorAndPrint();
+      GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
+      break;
+    }
+
+    Sleep(5);
+  }
+  _endthread();
 }
 
-SOCKET setup_socket()
+DWORD setup_socket()
 {
   // setup winsock
   WSADATA wsaData;
   int wsaStartupResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
   if (wsaStartupResult != 0) {
+    reset_console();
     printf_s("WSA Startup Failed: %d\n", wsaStartupResult);
     return (SOCKET) SOCKET_ERROR;
   }
 
   // create socket
-  SOCKET sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+  sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   if (sock == SOCKET_ERROR) {
-    printf_s("Socket creation failed: %d\n", WSAGetLastError());
+    reset_console();
+    printf_s("Socket creation failed.\n");
+    WSAGetLastErrorAndPrint();
     WSACleanup();
     return (SOCKET) SOCKET_ERROR;
   }
@@ -139,51 +196,118 @@ SOCKET setup_socket()
   addr.sin_port = htons(SENDPORT);
   addr.sin_addr.s_addr = htonl(INADDR_ANY);
   if (bind(sock, (SOCKADDR *)&addr, sizeof(addr)) == SOCKET_ERROR) {
+    reset_console();
     printf_s("Error binding socket.\n");
+    WSAGetLastErrorAndPrint();
+    closesocket(sock);
     WSACleanup();
     return (SOCKET) SOCKET_ERROR;
   }
   printf_s("Listening for UDP packets on port %hu.\n", SENDPORT);
 
-  return sock;
+  return 0;
 }
 
 int main(void)
 {
 
+  // setup console
   if (!setup_console()) return GetLastErrorAndPrint();
-
-  SOCKET sock = setup_socket();
-  if (sock == SOCKET_ERROR) {
+  
+  // setup data buffer and mutex
+  x = malloc(NUMX*sizeof(double));
+  xMutex = CreateMutex(NULL, FALSE, NULL);
+  if (xMutex == NULL) {
     reset_console();
+    return GetLastErrorAndPrint();
+  }
+
+  // setup socket
+  if (setup_socket() == SOCKET_ERROR) {
     return EXIT_FAILURE;
   } 
 
-  x = malloc(NUMX*sizeof(double));
-  if (!SetConsoleCtrlHandler(&cleanup, TRUE)) return GetLastErrorAndPrint();
+  // setup ctrl-c handler to cleanup
+  if (!SetConsoleCtrlHandler(&cleanup, TRUE)) {
+    cleanup(9);
+    return GetLastErrorAndPrint();
+  }
 
-  // handle input in a different thread
-  _beginthread(&handleInput, 2048, NULL);
+  // handle user input in a different thread
+  if (!_beginthread(&handleUserInput, 0, NULL)) {
+    reset_console();
+    printf("Error creating user input thread.\n");
+    cleanup(10);
+    return EXIT_FAILURE;
+  }
+
+  // handle UDP input in a different thread
+  if(!_beginthread(&handleUDPInput, 0, NULL)) {
+    reset_console();
+    printf("Error creating UDP input thread.\n");
+    cleanup(11);
+    return EXIT_FAILURE;
+  }
 
   printf_s("Press <space> to pause.  Press `x` to quit.  Press `+` or `-` to display speed.\n");
+  clock_t lastClock = clock();
+  clock_t nextClock = lastClock;
+  int iRun = 0;
+  char runIndicator[] = {'|', '/', '-', '\\'};
   while (TRUE) {
-    // need to read all data off socket, even if we can't show it
-    for (int i = 0; i < nskip; i++) get_data(x, sock);
     if (inCleanup) break;
- 
-    printf_s("\x1b[1G\x1b[3d"); // bring cursor back to top
-    printf_s("Displaying every %d packet\n", nskip);
-    if (!paused) {
-      printf(RUN_MSG "\n");
-      for (int j = 0; j < NUMX; j++) {  
-        if (j % 5 == 0) {
-          printf_s("\r\n");
-        }
-        printf_s("x[%3d]=%8.4f  ", j, x[j]);
-      }
-    } else {
+    nextClock = lastClock + dtDisplay;
+    DWORD dtSleep = __max(0, (nextClock - clock()));
+    Sleep(dtSleep);
+    lastClock = nextClock;
+
+    // can print some stuff without the data mutex
+    // this helps us feel better that stuff is running
+    //printf_s(ESC "[1G" ESC "[3d"); // bring cursor back to top
+    printf_s(ESC "[3;1H"); // set cursor position
+    printf_s("Display updates every %d ms\n", dtDisplay);
+    if (paused) {
       printf(PAUSE_COLOR PAUSE_MSG RESET_COLOR "\n");
+      continue;
     }
+    iRun = (iRun + 1) % 4;
+    printf(RUN_MSG " %c\n", runIndicator[iRun]);
+
+    // wait for data mutex
+    DWORD waitResult = WaitForSingleObject(xMutex, dtDisplay);    
+    if (waitResult == WAIT_TIMEOUT) {
+      // nothing new to display
+      continue;
+    } else if (waitResult == WAIT_ABANDONED) {
+      reset_console();
+      if (!ReleaseMutex(xMutex)) GetLastErrorAndPrint();
+      printf_s("Error in UDP thread getting mutex, WAIT_ABANDONED\n");
+      GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
+      break;
+    } else if (waitResult == WAIT_FAILED) {
+      if (!ReleaseMutex(xMutex)) GetLastErrorAndPrint();
+      reset_console();
+      printf_s("Error in UDP thread getting mutex, WAIT_FAILED\n");
+      GetLastErrorAndPrint();
+      GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
+      break;
+    }
+    
+    // print data
+    for (int j = 0; j < NUMX; j++) {  
+      if (j % 5 == 0) {
+        printf_s("\r\n");
+      }
+      printf_s("x[%3d]=%8.4f  ", j, x[j]);
+    }
+    if (!ReleaseMutex(xMutex)) {
+      reset_console();
+      printf_s("Error releasing mutex in display thread.\n");
+      GetLastErrorAndPrint();
+      GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
+      break;
+    }
+    
   }
   if (!inCleanup) cleanup(7);
   return 0;

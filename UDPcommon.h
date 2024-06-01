@@ -3,7 +3,7 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include <windows.h>
+#include <winsock2.h>
 
 // number of doubles in buffer
 #define NUMX 200
@@ -12,5 +12,8 @@
 #define SENDADDR "127.0.0.1"
 #define SENDPORT 41952
 
-// helper function
+// Print last windows error and message
 DWORD GetLastErrorAndPrint(void);
+
+// Print last WSA error number and message
+DWORD WSAGetLastErrorAndPrint(void);
