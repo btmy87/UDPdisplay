@@ -127,13 +127,13 @@ void __cdecl handleUserInput(void* in)
         }
       } else if (inp == '-') {
         if (dtDisplay <= 520) {
-          dtDisplay = __max(20, (dtDisplay-20));
+          dtDisplay = __max(0, (dtDisplay-20));
         } else {
           dtDisplay -= 100;
         }
       }
     }
-    //Sleep(20);
+    Sleep(20);
   }
   _endthread();
 }
@@ -216,6 +216,20 @@ DWORD setup_socket()
   return 0;
 }
 
+void print_double(char* buf, char* dispName, int width, int precision,
+                  double lowLimit, double lowWarn,
+                  double highLimit, double highWarn) {
+  double val = *( (double*) buf);
+  int formatColor = 0;
+  if (val <= lowLimit) { formatColor = 44;} // blue background
+  else if (val <= lowWarn) {formatColor = 94;} // blue text
+  else if (val >= highLimit) {formatColor = 41;} // red background
+  else if (val >= highWarn) {formatColor = 33;} // yellow text
+  printf_s("%s= " ESC "[%dm%*.*f" ESC "[0m  ", dispName, formatColor, width, precision, val);
+  (void) formatColor;
+  //printf_s("%s= %*.*f  ", dispName, width, precision, val);
+}
+
 int main(void)
 {
 
@@ -262,13 +276,16 @@ int main(void)
   clock_t nextClock = lastClock;
   int iRun = 0;
   char runIndicator[] = {'|', '/', '-', '\\'};
+  char dispName[10] = "         ";
   while (TRUE) {
     if (inCleanup) break;
 
     // sleep until next update, but want to update
     // display frequence faster so we appear responsive
     nextClock = lastClock + dtDisplay;
-    while (nextClock > clock()) {
+    for (int i = 0; i < INT_MAX; i++) {
+    //while (nextClock > clock()) {
+      // force at least one loop
       DWORD dtSleep = __max(0, (nextClock - clock()));
       dtSleep = __min(dtSleep, 50);
       Sleep(dtSleep);
@@ -283,10 +300,10 @@ int main(void)
       }
       iRun = (iRun + 1) % 4;
       printf(RUN_MSG " %c\n", runIndicator[iRun]);
+
+      if (clock() >= nextClock) break;
     }
     lastClock = nextClock;
-
-
 
     // wait for data mutex
     DWORD waitResult = WaitForSingleObject(xMutex, dtDisplay);    
@@ -313,7 +330,10 @@ int main(void)
       if (j % 5 == 0) {
         printf_s("\r\n");
       }
-      printf_s("x[%3d]=%8.4f  ", j, x[j]);
+      //printf_s("x[%3d]=%8.4f  ", j, x[j]);
+      sprintf_s(dispName, 10, "x[%3d]", j);
+      print_double(((char*) x) + sizeof(double)*j, 
+        dispName, 8, 4, -0.9, -0.7, 0.9, 0.7);
     }
     if (!ReleaseMutex(xMutex)) {
       reset_console();
