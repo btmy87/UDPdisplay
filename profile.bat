@@ -27,4 +27,6 @@ pause
 %vsdiag% stop %profid% /output:%outfile%
 
 :: open output results
+echo Continue to open results, ctrl-c to skip
+pause
 devenv %outfile%

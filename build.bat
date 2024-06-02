@@ -23,7 +23,8 @@ if "%DEBUG%" == "1" (
   set CLOPTS=%CLOPTS% /O2 /MT /Zi
   set LINKOPTS=%LINKOPTS% /DEBUG /OPT:REF /OPT:ICF
 ) else (
-  set CLOPTS=%CLOPTS% /O2 /MT /RELEASE
+  set CLOPTS=%CLOPTS% /O2 /MT
+  set LINKOPTS=%LINKOPTS% /RELEASE
 )
 
 

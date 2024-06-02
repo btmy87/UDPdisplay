@@ -41,6 +41,11 @@ char recvTimeStr[26] = "                         ";
 #define PAUSE_COLOR "\x1b[41m"
 #define RESET_COLOR "\x1b[0m"
 
+#define NBUF 16384
+char* screenBuf = NULL;
+int iBuf = 0; // counter for tracking our location in buffer
+BOOL inCleanup = FALSE;
+
 DWORD setup_console(void)
 {
   // first we need to enable vt processing
@@ -68,6 +73,7 @@ BOOL consoleReset = FALSE;
 void reset_console()
 {
   if (!consoleReset) {
+    inCleanup = TRUE;
     printf_s("\n");
     printf_s(ESC "[?25h"); // show cursor
     printf_s(ESC "[?1049l"); // back to normal screen buffer
@@ -85,7 +91,7 @@ void get_data()
                         (struct sockaddr*) &srcaddr, &srcaddrLen);
   if (nbytes == SOCKET_ERROR) {
     reset_console();
-    printf_s("Error during recv:\n");
+    printf_s("Error during recvfrom:\n");
     WSAGetLastErrorAndPrint();
     GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
   } else if (nbytes != nbytesExpected) {
@@ -101,17 +107,18 @@ void get_data()
 // inCleanup variable to stop execution in the main thread
 // as soon as we enter cleanup.  Otherwise, we can get strange
 // results, with stuff printed to the normal screen buffer
-BOOL inCleanup = FALSE;
 BOOL __stdcall cleanup(DWORD dwCtrlType)
 {
   //dwCtrlType; // don't need dwCtrlType
   inCleanup = TRUE;
   reset_console();
   if (dwCtrlType < 7) printf("Received ctrl signal: %d\n", dwCtrlType);
-  free(x);
-  CloseHandle(xMutex);
+
   closesocket(sock);
-  WSACleanup();
+  WSACleanup();  
+  CloseHandle(xMutex);
+  if (x) free(x);
+  if (screenBuf) free(screenBuf);
   return FALSE; // let any other handlers run
 }
 
@@ -119,28 +126,25 @@ void __cdecl handleUserInput(void* in)
 {
   (void) in; // unused parameter
   while (TRUE) {
-    if (_kbhit()) {
-      int inp = _getch();
-      if (inp == ' ') {
-        paused = paused ? FALSE : TRUE; // toggle paused
-      } else if (inp == 'x') {
-        GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
-        break;
-      } else if (inp == '+') {
-        if (dtDisplay <= 480) {
-          dtDisplay += 20;
-        } else {
-          dtDisplay = __min(5000, (dtDisplay+100));
-        }
-      } else if (inp == '-') {
-        if (dtDisplay <= 520) {
-          dtDisplay = __max(20, (dtDisplay-20));
-        } else {
-          dtDisplay -= 100;
-        }
+    int inp = _getch();
+    if (inp == ' ') {
+      paused = paused ? FALSE : TRUE; // toggle paused
+    } else if (inp == 'x') {
+      GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
+      break;
+    } else if (inp == '+') {
+      if (dtDisplay <= 480) {
+        dtDisplay += 20;
+      } else {
+        dtDisplay = __min(5000, (dtDisplay+100));
+      }
+    } else if (inp == '-') {
+      if (dtDisplay <= 520) {
+        dtDisplay = __max(20, (dtDisplay-20));
+      } else {
+        dtDisplay -= 100;
       }
     }
-    Sleep(20);
   }
   _endthread();
 }
@@ -153,6 +157,7 @@ void __cdecl handleUDPInput(void* in)
     DWORD waitResult = WaitForSingleObject(xMutex, INFINITE);
 
     // get the data
+    if (inCleanup) break;
     if (waitResult == WAIT_OBJECT_0) {
       get_data();
     } else if (waitResult == WAIT_ABANDONED) {
@@ -178,8 +183,6 @@ void __cdecl handleUDPInput(void* in)
       GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
       break;
     }
-
-    Sleep(5);
   }
   _endthread();
 }
@@ -238,7 +241,9 @@ void print_double(char* buf, char* dispName, int width, int precision,
   
   // don't color between limits
   if (val > lowWarn && val < highWarn) {
-    printf_s("%s= %*.*f  ", dispName, width, precision, val);
+    //printf_s("%s= %*.*f  ", dispName, width, precision, val);
+    iBuf += sprintf_s(screenBuf+iBuf, NBUF, "%s= %*.*f  ", 
+      dispName, width, precision, val);
     return;
   }
   int R = 0;
@@ -260,10 +265,16 @@ void print_double(char* buf, char* dispName, int width, int precision,
     B = lround(HB*cf);
   }
   if (val < lowLimit || val > highLimit) {
-    printf_s(ESC "[4m" "%s= " ESC "[48;2;%d;%d;%dm" "%*.*f" ESC "[0m  " ,
+    //printf_s(ESC "[4m" "%s= " ESC "[48;2;%d;%d;%dm" "%*.*f" ESC "[0m  " ,
+    //  dispName, R, G, B, width, precision, val);
+    iBuf += sprintf_s(screenBuf+iBuf, NBUF, 
+      ESC "[4m" "%s= " ESC "[48;2;%d;%d;%dm" "%*.*f" ESC "[0m  " ,
       dispName, R, G, B, width, precision, val);
   } else {
-    printf_s("%s= " ESC "[48;2;%d;%d;%dm" "%*.*f" ESC "[0m  " ,
+    //printf_s("%s= " ESC "[48;2;%d;%d;%dm" "%*.*f" ESC "[0m  " ,
+    //  dispName, R, G, B, width, precision, val);
+    iBuf += sprintf_s(screenBuf+iBuf, NBUF, 
+      "%s= " ESC "[48;2;%d;%d;%dm" "%*.*f" ESC "[0m  " ,
       dispName, R, G, B, width, precision, val);
   }
 }
@@ -276,16 +287,19 @@ int main(void)
   
   // setup data buffer and mutex
   x = malloc(NUMX*sizeof(double));
+  screenBuf = malloc(NBUF);
   xMutex = CreateMutex(NULL, FALSE, NULL);
   if (xMutex == NULL) {
-    if (x) free(x);
+    if (x) free(x); x = NULL;
+    if (screenBuf) free(screenBuf); screenBuf = NULL;
     reset_console();
     return GetLastErrorAndPrint();
   }
 
   // setup socket
   if (setup_socket() == SOCKET_ERROR) {
-    if (x) free(x);
+    if (x) free(x); x = NULL;
+    if (screenBuf) free(screenBuf); screenBuf = NULL;
     reset_console();
     return EXIT_FAILURE;
   } 
@@ -337,8 +351,9 @@ int main(void)
       printf_s("Display updates every %4d ms\n", dtDisplay);
       _localtime32_s( &recvTime, &recvClock);
       asctime_s(recvTimeStr, 26, &recvTime);
-      printf_s("Last message from: %15s at %25s\n",
-        inet_ntoa(srcaddr.sin_addr), recvTimeStr);
+      printf_s("Last message from: %15s:%5d at %25s\n",
+        inet_ntoa(srcaddr.sin_addr), ntohs(srcaddr.sin_port),
+        recvTimeStr);
       if (paused) {
         printf(PAUSE_COLOR PAUSE_MSG RESET_COLOR "\n");
         continue;
@@ -371,15 +386,19 @@ int main(void)
     }
     
     // print data
+    iBuf = 0;
     for (int j = 0; j < NUMX; j++) {  
       if (j % 5 == 0) {
-        printf_s("\r\n");
+        //printf_s("\r\n");
+        iBuf += sprintf_s(screenBuf+iBuf, NBUF, "\n");
       }
       //printf_s("x[%3d]=%8.4f  ", j, x[j]);
       sprintf_s(dispName, 10, "x[%3d]", j);
       print_double(((char*) x) + sizeof(double)*j, 
-        dispName, 8, 4, -0.9, -0.7, 0.9, 0.7);
+        dispName, 8, 4, -0.9, -0.2, 0.9, 0.2);
     }
+    if (inCleanup) break;
+    printf_s("%s", screenBuf);
     if (!ReleaseMutex(xMutex)) {
       reset_console();
       printf_s("Error releasing mutex in display thread.\n");
