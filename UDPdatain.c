@@ -66,6 +66,7 @@ void get_data()
       nbytes, nbytesExpected);
   }
   _time32(&recvClock); // save the time we got the last message
+  lastRecv = clock();
 }
 
 void __cdecl handleUDPInput(void* in)

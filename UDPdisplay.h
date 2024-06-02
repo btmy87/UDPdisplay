@@ -38,6 +38,7 @@ extern SOCKET sock;
 extern struct sockaddr_in srcaddr;
 extern int srcaddrLen;
 extern __time32_t recvClock;
+extern clock_t lastRecv;  // clock() from last packet
 
 // cleanup flag
 // indicates to other threads that we're in the process of shutting down

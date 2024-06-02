@@ -37,6 +37,7 @@ int srcaddrLen = sizeof(srcaddr);
 __time32_t recvClock;
 struct tm recvTime;
 char recvTimeStr[26] = "                         ";
+clock_t lastRecv = 0;
 
 #define PAUSE_MSG "!!!!!!!!!!!!!!!!!!!! PAUSED  !!!!!!!!!!!!!!!!!!!!!"
 #define RUN_MSG   "-------------------- RUNNING ---------------------"
@@ -115,20 +116,27 @@ void __cdecl handleUserInput(void* in)
     if (inp == ' ') {
       paused = paused ? FALSE : TRUE; // toggle paused
     } else if (inp == 'x') {
+      // exit program
       GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
       break;
     } else if (inp == '+') {
+      // increase display update dt
       if (dtDisplay <= 480) {
         dtDisplay += 20;
       } else {
         dtDisplay = __min(5000, (dtDisplay+100));
       }
     } else if (inp == '-') {
+      // decrease display update dt
       if (dtDisplay <= 520) {
         dtDisplay = __max(20, (dtDisplay-20));
       } else {
         dtDisplay -= 100;
       }
+    } else if (inp == 'c') {
+      // clear screen, maybe after a resize?
+      // not sure why, but need re-hide cursor
+      printf_s(ESC "[2J" ESC "[?25l");
     }
   }
   _endthread();
@@ -235,6 +243,7 @@ int initial_setup()
     cleanup(11);
     return EXIT_FAILURE;
   }
+  lastRecv = clock();
   return EXIT_SUCCESS;
 }
 
@@ -260,13 +269,17 @@ void wait_for_screen_update()
     
     // can print some stuff without the data mutex
     // this helps us feel better that stuff is running
-    printf_s(ESC "[4;1H"); // set cursor position
+    printf_s(ESC "[2;1H"); // set cursor position  
+    // print help message
+    printf_s("<space> pause, `x` quit, `+/-` display interval, `c` reset screen\n");
+
     printf_s("Display updates every %4d ms\n", dtDisplay);
     _localtime32_s( &recvTime, &recvClock);
     asctime_s(recvTimeStr, 26, &recvTime);
-    printf_s("Last message from: %15s:%5d at %25s\n",
+    printf_s("Last message from: %15s:%5d at %25s" 
+             "Time since last message: %8d ms\n",
       inet_ntoa(srcaddr.sin_addr), ntohs(srcaddr.sin_port),
-      recvTimeStr);
+      recvTimeStr, clock() - lastRecv);
     if (paused) {
       printf(PAUSE_COLOR PAUSE_MSG RESET_COLOR "\n");
       continue;
@@ -286,11 +299,9 @@ void print_data()
   static char dispName[10] = "         ";
   for (int j = 0; j < NUMX; j++) {  
     if (j % 5 == 0) {
-      //printf_s("\r\n");
       iBuf += sprintf_s(screenBuf+iBuf, NBUF, "\n");
     }
-    //printf_s("x[%3d]=%8.4f  ", j, x[j]);
-    sprintf_s(dispName, 10, "x[%3d]", j);
+    sprintf_s(dispName, 10, " x[%3d]", j);
     print_double(((char*) x) + sizeof(double)*j, 
       dispName, 8, 4, -0.9, -0.2, 0.9, 0.2);
   }
@@ -301,9 +312,6 @@ void print_data()
 int main(void)
 {
   if (initial_setup() != EXIT_SUCCESS) return EXIT_FAILURE;
-
-  // print help message
-  printf_s("Press <space> to pause.  Press `x` to quit.  Press `+` or `-` to display speed.\n");
 
   while (TRUE) {
     if (inCleanup) break;
