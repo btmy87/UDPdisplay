@@ -9,8 +9,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <wchar.h>
 #include <windows.h>
+#include <wchar.h>
 #include <winnt.h>
 #include <math.h>
 #include <time.h>
@@ -18,6 +18,9 @@
 #include <process.h>
 #include <conio.h>
 #include <winsock2.h>
+
+#include "UDPdisplay.h"
+#include "UDPdatain.h"
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -83,24 +86,6 @@ void reset_console()
   }
 }
 
-// get data from UDP packet
-void get_data()
-{
-  const int nbytesExpected = NUMX*sizeof(double);
-  int nbytes = recvfrom(sock, (char*)x, nbytesExpected, 0, 
-                        (struct sockaddr*) &srcaddr, &srcaddrLen);
-  if (nbytes == SOCKET_ERROR) {
-    reset_console();
-    printf_s("Error during recvfrom:\n");
-    WSAGetLastErrorAndPrint();
-    GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
-  } else if (nbytes != nbytesExpected) {
-    printf_s("Received %d bytes, expected %d bytes\n", 
-      nbytes, nbytesExpected);
-  }
-  _time32(&recvClock); // save the time we got the last message
-}
-
 
 // register a handler so we can cleanup after a ctrl C
 // since this runs in a different thread, we use the
@@ -149,82 +134,7 @@ void __cdecl handleUserInput(void* in)
   _endthread();
 }
 
-void __cdecl handleUDPInput(void* in)
-{
-  (void) in; // unused parameter
-  while (TRUE) {
-    // wait until we can get data Mutex
-    DWORD waitResult = WaitForSingleObject(xMutex, INFINITE);
 
-    // get the data
-    if (inCleanup) break;
-    if (waitResult == WAIT_OBJECT_0) {
-      get_data();
-    } else if (waitResult == WAIT_ABANDONED) {
-      reset_console();
-      if (!ReleaseMutex(xMutex)) GetLastErrorAndPrint();
-      printf_s("Error in UDP thread getting mutex, WAIT_ABANDONED\n");
-      GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
-      break;
-    } else if (waitResult == WAIT_FAILED) {
-      reset_console();
-      if (!ReleaseMutex(xMutex)) GetLastErrorAndPrint();
-      printf_s("Error in UDP thread getting mutex, WAIT_FAILED\n");
-      GetLastErrorAndPrint();
-      GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
-      break;
-    }
-
-    // release the Mutex
-    if (!ReleaseMutex(xMutex)) {
-      reset_console();
-      printf_s("Error releasing mutex\n");
-      GetLastErrorAndPrint();
-      GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
-      break;
-    }
-  }
-  _endthread();
-}
-
-DWORD setup_socket()
-{
-  // setup winsock
-  WSADATA wsaData;
-  int wsaStartupResult = WSAStartup(MAKEWORD(2, 2), &wsaData);
-  if (wsaStartupResult != 0) {
-    reset_console();
-    printf_s("WSA Startup Failed: %d\n", wsaStartupResult);
-    return (SOCKET) SOCKET_ERROR;
-  }
-
-  // create socket
-  sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-  if (sock == SOCKET_ERROR) {
-    reset_console();
-    printf_s("Socket creation failed.\n");
-    WSAGetLastErrorAndPrint();
-    WSACleanup();
-    return (SOCKET) SOCKET_ERROR;
-  }
-
-  // bind socket
-  SOCKADDR_IN addr;
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons(SENDPORT);
-  addr.sin_addr.s_addr = htonl(INADDR_ANY);
-  if (bind(sock, (SOCKADDR *)&addr, sizeof(addr)) == SOCKET_ERROR) {
-    reset_console();
-    printf_s("Error binding socket.\n");
-    WSAGetLastErrorAndPrint();
-    closesocket(sock);
-    WSACleanup();
-    return (SOCKET) SOCKET_ERROR;
-  }
-  printf_s("Listening for UDP packets on port %hu.\n", SENDPORT);
-
-  return 0;
-}
 
 void print_double(char* buf, char* dispName, int width, int precision,
                   double lowLimit, double lowWarn,
@@ -279,9 +189,9 @@ void print_double(char* buf, char* dispName, int width, int precision,
   }
 }
 
-int main(void)
+// perform initial setup tasks
+int initial_setup()
 {
-
   // setup console
   if (!setup_console()) return GetLastErrorAndPrint();
   
@@ -325,80 +235,94 @@ int main(void)
     cleanup(11);
     return EXIT_FAILURE;
   }
+  return EXIT_SUCCESS;
+}
 
+// wait for next full screen update
+// printing packet and status info so we know we're running
+void wait_for_screen_update()
+{
+  // sleep until next update, but want to update
+  // display frequence faster so we appear responsive
+  static clock_t lastClock = 0;
+  static clock_t nextClock = 0;
+  static int iRun = 0;
+  const char runIndicator[] = {'|', '/', '-', '\\'};
+
+  // initialize clock
+  if (lastClock == 0) lastClock = clock();
+
+  nextClock = lastClock + dtDisplay;
+  while (TRUE) {
+    DWORD dtSleep = __max(0, (nextClock - clock()));
+    dtSleep = __min(dtSleep, 50);
+    Sleep(dtSleep);
+    
+    // can print some stuff without the data mutex
+    // this helps us feel better that stuff is running
+    printf_s(ESC "[4;1H"); // set cursor position
+    printf_s("Display updates every %4d ms\n", dtDisplay);
+    _localtime32_s( &recvTime, &recvClock);
+    asctime_s(recvTimeStr, 26, &recvTime);
+    printf_s("Last message from: %15s:%5d at %25s\n",
+      inet_ntoa(srcaddr.sin_addr), ntohs(srcaddr.sin_port),
+      recvTimeStr);
+    if (paused) {
+      printf(PAUSE_COLOR PAUSE_MSG RESET_COLOR "\n");
+      continue;
+    }
+    iRun = (iRun + 1) % 4;
+    printf(RUN_MSG " %c\n", runIndicator[iRun]);
+
+    if (clock() >= nextClock) break;
+  }
+  lastClock = nextClock;
+}
+
+// prints data to screen
+void print_data()
+{
+  iBuf = 0;
+  static char dispName[10] = "         ";
+  for (int j = 0; j < NUMX; j++) {  
+    if (j % 5 == 0) {
+      //printf_s("\r\n");
+      iBuf += sprintf_s(screenBuf+iBuf, NBUF, "\n");
+    }
+    //printf_s("x[%3d]=%8.4f  ", j, x[j]);
+    sprintf_s(dispName, 10, "x[%3d]", j);
+    print_double(((char*) x) + sizeof(double)*j, 
+      dispName, 8, 4, -0.9, -0.2, 0.9, 0.2);
+  }
+  if (inCleanup) return; // in case someone started cleanup
+  printf_s("%s", screenBuf);
+}
+
+int main(void)
+{
+  if (initial_setup() != EXIT_SUCCESS) return EXIT_FAILURE;
+
+  // print help message
   printf_s("Press <space> to pause.  Press `x` to quit.  Press `+` or `-` to display speed.\n");
-  clock_t lastClock = clock();
-  clock_t nextClock = lastClock;
-  int iRun = 0;
-  char runIndicator[] = {'|', '/', '-', '\\'};
-  char dispName[10] = "         ";
+
   while (TRUE) {
     if (inCleanup) break;
 
-    // sleep until next update, but want to update
-    // display frequence faster so we appear responsive
-    nextClock = lastClock + dtDisplay;
-    for (int i = 0; i < INT_MAX; i++) {
-    //while (nextClock > clock()) {
-      // force at least one loop
-      DWORD dtSleep = __max(0, (nextClock - clock()));
-      dtSleep = __min(dtSleep, 50);
-      Sleep(dtSleep);
-      
-      // can print some stuff without the data mutex
-      // this helps us feel better that stuff is running
-      printf_s(ESC "[4;1H"); // set cursor position
-      printf_s("Display updates every %4d ms\n", dtDisplay);
-      _localtime32_s( &recvTime, &recvClock);
-      asctime_s(recvTimeStr, 26, &recvTime);
-      printf_s("Last message from: %15s:%5d at %25s\n",
-        inet_ntoa(srcaddr.sin_addr), ntohs(srcaddr.sin_port),
-        recvTimeStr);
-      if (paused) {
-        printf(PAUSE_COLOR PAUSE_MSG RESET_COLOR "\n");
-        continue;
-      }
-      iRun = (iRun + 1) % 4;
-      printf(RUN_MSG " %c\n", runIndicator[iRun]);
-
-      if (clock() >= nextClock) break;
-    }
-    lastClock = nextClock;
+    wait_for_screen_update();
 
     // wait for data mutex
     DWORD waitResult = WaitForSingleObject(xMutex, dtDisplay);    
-    if (waitResult == WAIT_TIMEOUT) {
-      // nothing new to display
-      continue;
-    } else if (waitResult == WAIT_ABANDONED) {
+    if (waitResult == WAIT_TIMEOUT) continue; // no new data
+    if (waitResult == WAIT_ABANDONED || waitResult == WAIT_FAILED) {
       reset_console();
       if (!ReleaseMutex(xMutex)) GetLastErrorAndPrint();
-      printf_s("Error in UDP thread getting mutex, WAIT_ABANDONED\n");
+      printf_s("Error in UDP thread getting mutex, %d\n", waitResult);
       GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
       break;
-    } else if (waitResult == WAIT_FAILED) {
-      if (!ReleaseMutex(xMutex)) GetLastErrorAndPrint();
-      reset_console();
-      printf_s("Error in UDP thread getting mutex, WAIT_FAILED\n");
-      GetLastErrorAndPrint();
-      GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
-      break;
-    }
-    
-    // print data
-    iBuf = 0;
-    for (int j = 0; j < NUMX; j++) {  
-      if (j % 5 == 0) {
-        //printf_s("\r\n");
-        iBuf += sprintf_s(screenBuf+iBuf, NBUF, "\n");
-      }
-      //printf_s("x[%3d]=%8.4f  ", j, x[j]);
-      sprintf_s(dispName, 10, "x[%3d]", j);
-      print_double(((char*) x) + sizeof(double)*j, 
-        dispName, 8, 4, -0.9, -0.2, 0.9, 0.2);
-    }
-    if (inCleanup) break;
-    printf_s("%s", screenBuf);
+    } 
+        
+    print_data();
+
     if (!ReleaseMutex(xMutex)) {
       reset_console();
       printf_s("Error releasing mutex in display thread.\n");

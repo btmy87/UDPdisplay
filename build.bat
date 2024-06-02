@@ -27,9 +27,8 @@ if "%DEBUG%" == "1" (
   set LINKOPTS=%LINKOPTS% /RELEASE
 )
 
-
 @echo on
 cl %CLOPTS% *.c
 
-link %LINKOPTS% UDPdisplay.obj UDPcommon.obj
+link %LINKOPTS% UDPdisplay.obj UDPcommon.obj UDPdatain.obj
 link %LINKOPTS% UDPsource.obj UDPcommon.obj
