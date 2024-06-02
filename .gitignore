@@ -54,3 +54,4 @@ dkms.conf
 #my additions
 .vscode/
 .vs/
+*.diagsession

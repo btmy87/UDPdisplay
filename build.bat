@@ -5,17 +5,27 @@ setlocal
 
 :: check for debug build
 set DEBUG=0
+set RELDEBUG=0
 if /I "%~1" == "debug" set DEBUG=1
+if /I "%~1" == "reldebug" set RELDEBUG=1
 
 set CLOPTS=/nologo /W4 /WX /c
-set LINKOPTS=/nologo
+set LINKOPTS=/NOLOGO /INCREMENTAL:NO
 
-if "%DEBUG%" == "0" (
-  set CLOPTS=%CLOPTS% /O2 /MT
-) else (
+:: 3 options
+:: - Debug
+:: - Release build with debugging info (helps with profiling)
+:: - Release (no debugging info)
+if "%DEBUG%" == "1" (
   set CLOPTS=%CLOPTS% /Zi /MTd /Od
   set LINKOPTS=%LINKOPTS% /DEBUG
+) else if "%RELDEBUG%" == "1" (
+  set CLOPTS=%CLOPTS% /O2 /MT /Zi
+  set LINKOPTS=%LINKOPTS% /DEBUG /OPT:REF /OPT:ICF
+) else (
+  set CLOPTS=%CLOPTS% /O2 /MT /RELEASE
 )
+
 
 @echo on
 cl %CLOPTS% *.c

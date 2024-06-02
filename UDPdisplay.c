@@ -278,12 +278,15 @@ int main(void)
   x = malloc(NUMX*sizeof(double));
   xMutex = CreateMutex(NULL, FALSE, NULL);
   if (xMutex == NULL) {
+    if (x) free(x);
     reset_console();
     return GetLastErrorAndPrint();
   }
 
   // setup socket
   if (setup_socket() == SOCKET_ERROR) {
+    if (x) free(x);
+    reset_console();
     return EXIT_FAILURE;
   } 
 
