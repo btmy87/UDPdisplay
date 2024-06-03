@@ -38,6 +38,9 @@ __time32_t recvClock;
 struct tm recvTime;
 char recvTimeStr[26] = "                         ";
 clock_t lastRecv = 0;
+size_t frameCount = 0;
+const size_t blinkOn = 1;
+const size_t blinkOff = 1;
 
 #define PAUSE_MSG "!!!!!!!!!!!!!!!!!!!! PAUSED  !!!!!!!!!!!!!!!!!!!!!"
 #define RUN_MSG   "-------------------- RUNNING ---------------------"
@@ -168,33 +171,31 @@ void print_double(char* buf, char* dispName, int width, int precision,
   int G = 0;
   int B = 0;
   double cf = 0.0;
+  
+  double blink = 1.0;
+  BOOL isLimit = val < lowLimit || val > highLimit;
+  BOOL isBlink = (frameCount % (blinkOn+blinkOff)) >= blinkOn;
+  if (isLimit && isBlink) blink = 0.8;
+  
   if (val < lowWarn) {
     cf = wf + (1.0-wf)*(lowWarn - val)/(lowWarn - lowLimit);
-    cf = __min(cf, 1.0);
+    cf = __min(cf, 1.0)*blink;
     R = lround(LR*cf);
     G = lround(LG*cf);
     B = lround(LB*cf);
   } else {
     // must be > highWarn
     cf = wf + (1.0-wf)*(val - highWarn)/(highLimit - highWarn);
-    cf = __min(cf, 1.0);
+    cf = __min(cf, 1.0)*blink;
     R = lround(HR*cf);
     G = lround(HG*cf);
     B = lround(HB*cf);
   }
-  if (val < lowLimit || val > highLimit) {
-    //printf_s(ESC "[4m" "%s= " ESC "[48;2;%d;%d;%dm" "%*.*f" ESC "[0m  " ,
-    //  dispName, R, G, B, width, precision, val);
-    iBuf += sprintf_s(screenBuf+iBuf, NBUF, 
-      ESC "[4m" "%s= " ESC "[48;2;%d;%d;%dm" "%*.*f" ESC "[0m  " ,
-      dispName, R, G, B, width, precision, val);
-  } else {
-    //printf_s("%s= " ESC "[48;2;%d;%d;%dm" "%*.*f" ESC "[0m  " ,
-    //  dispName, R, G, B, width, precision, val);
-    iBuf += sprintf_s(screenBuf+iBuf, NBUF, 
-      "%s= " ESC "[48;2;%d;%d;%dm" "%*.*f" ESC "[0m  " ,
-      dispName, R, G, B, width, precision, val);
-  }
+
+  iBuf += sprintf_s(screenBuf+iBuf, NBUF, 
+    "%s= " ESC "[48;2;%d;%d;%dm" "%*.*f" ESC "[0m  " ,
+    dispName, R, G, B, width, precision, val);
+  
 }
 
 // perform initial setup tasks
@@ -266,6 +267,7 @@ void wait_for_screen_update()
     DWORD dtSleep = __max(0, (nextClock - clock()));
     dtSleep = __min(dtSleep, 50);
     Sleep(dtSleep);
+    frameCount++;
     
     // can print some stuff without the data mutex
     // this helps us feel better that stuff is running
