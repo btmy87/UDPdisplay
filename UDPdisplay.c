@@ -21,6 +21,7 @@
 
 #include "UDPdisplay.h"
 #include "UDPdatain.h"
+#include "packetdef.h"
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -295,17 +296,37 @@ void wait_for_screen_update()
 }
 
 // prints data to screen
+// TODO: user to overwrite this function with something useful
+// void print_data()
+// {
+//   iBuf = 0;
+//   static char dispName[10] = "         ";
+//   for (int j = 0; j < NUMX; j++) {  
+//     if (j % 5 == 0) {
+//       iBuf += sprintf_s(screenBuf+iBuf, NBUF, "\n");
+//     }
+//     sprintf_s(dispName, 10, " x[%3d]", j);
+//     print_double(((char*) x) + sizeof(double)*j, 
+//       dispName, 8, 4, -0.9, -0.2, 0.9, 0.2);
+//   }
+//   if (inCleanup) return; // in case someone started cleanup
+//   printf_s("%s", screenBuf);
+// }
+
 void print_data()
 {
   iBuf = 0;
-  static char dispName[10] = "         ";
-  for (int j = 0; j < NUMX; j++) {  
-    if (j % 5 == 0) {
-      iBuf += sprintf_s(screenBuf+iBuf, NBUF, "\n");
+  for (int i = 0; i < NROWS*NCOLS; i++) {
+    if (i % NCOLS == 0) {
+      iBuf += sprintf_s(screenBuf+iBuf, NBUF-iBuf, "\n");
     }
-    sprintf_s(dispName, 10, " x[%3d]", j);
-    print_double(((char*) x) + sizeof(double)*j, 
-      dispName, 8, 4, -0.9, -0.2, 0.9, 0.2);
+    if (packet[i].type == UDP_DOUBLE) {
+      // TODO: really, print double should just take a packet struct
+      print_double(((char*) x) + packet[i].start_byte, 
+        packet[i].name, 8, 4, 
+        packet[i].lowLimit, packet[i].lowWarn,
+        packet[i].highLimit, packet[i].highWarn);
+    }
   }
   if (inCleanup) return; // in case someone started cleanup
   printf_s("%s", screenBuf);

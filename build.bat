@@ -30,5 +30,5 @@ if "%DEBUG%" == "1" (
 @echo on
 cl %CLOPTS% *.c
 
-link %LINKOPTS% UDPdisplay.obj UDPcommon.obj UDPdatain.obj
+link %LINKOPTS% UDPdisplay.obj UDPcommon.obj UDPdatain.obj packetdef.obj
 link %LINKOPTS% UDPsource.obj UDPcommon.obj
