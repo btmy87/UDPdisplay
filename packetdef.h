@@ -7,6 +7,8 @@ typedef struct udp_packet_item {
   double lowWarn;
   double highWarn;
   double highLimit;
+  int width; // width for print field
+  int precision; // precision for print field
   enum udp_item_type type;
   int start_byte;
 } udp_packet_item;

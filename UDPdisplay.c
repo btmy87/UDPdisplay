@@ -27,7 +27,7 @@
 
 #include "UDPcommon.h"
 
-double* x = NULL;  // data buffer
+char* x = NULL;  // data buffer
 HANDLE xMutex; // mutex to control access to data
 
 DWORD dtDisplay = 200;
@@ -148,10 +148,8 @@ void __cdecl handleUserInput(void* in)
 
 
 
-void print_double(char* buf, char* dispName, int width, int precision,
-                  double lowLimit, double lowWarn,
-                  double highLimit, double highWarn) {
-  double val = *( (double*) buf);
+void print_double(char* buf, udp_packet_item* pdef) {
+  double val = *( (double*) (buf + pdef->start_byte));
 
   const char* colorHigh = ESC "[48;2;152;58;18m";
   const char* colorLow = ESC "[48;2;0;80;133m";
@@ -166,23 +164,23 @@ void print_double(char* buf, char* dispName, int width, int precision,
   char* color = (char*) colorNone;
   char* indicator = (char*) indNone;
   BOOL isBlink = (frameCount % (blinkOn+blinkOff)) >= blinkOn;
-  if ( val > lowLimit && val <= lowWarn) {
+  if ( val > pdef->lowLimit && val <= pdef->lowWarn) {
     color = (char*) colorLow;
     indicator = (char*) indLowWarn;
-  } else if ( val <= lowLimit) {
+  } else if ( val <= pdef->lowLimit) {
     if (isBlink) color = (char*) colorLow;
     indicator = (char*) indLowLimit;
-  } else if ( val < highLimit && val >= highWarn) {
+  } else if ( val < pdef->highLimit && val >= pdef->highWarn) {
     color = (char*) colorHigh;
     indicator = (char*) indHighWarn;
-  } else if ( val >= highLimit) {
+  } else if ( val >= pdef->highLimit) {
     if (isBlink) color = (char*) colorHigh;
     indicator = (char*) indHighLimit;
   }
 
   iBuf += sprintf_s(screenBuf+iBuf, NBUF-iBuf, 
-    "%s =%s%s%s%*.*f  ", dispName, color, indicator, colorNone,
-    width, precision, val);
+    "%s =%s%s%s%*.*f  ", pdef->name, color, indicator, colorNone,
+    pdef->width, pdef->precision, val);
 }
 
 // perform initial setup tasks
@@ -288,13 +286,8 @@ void print_data()
     if (i % NCOLS == 0) {
       iBuf += sprintf_s(screenBuf+iBuf, NBUF-iBuf, "\n");
     }
-    if (packet[i].type == UDP_DOUBLE) {
-      // TODO: really, print double should just take a packet struct
-      print_double(((char*) x) + packet[i].start_byte, 
-        packet[i].name, 8, 4, 
-        packet[i].lowLimit, packet[i].lowWarn,
-        packet[i].highLimit, packet[i].highWarn);
-    }
+    if (packet[i].type == UDP_DOUBLE) print_double(x, &packet[i]);
+    
   }
   if (inCleanup) return; // in case someone started cleanup
   printf_s("%s", screenBuf);

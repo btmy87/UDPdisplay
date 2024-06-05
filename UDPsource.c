@@ -33,7 +33,7 @@ void generate_data(double* x1, int i)
   double t = 0.01*i;
   x1[0] = t;
   for (int j = 1; j < NUMX; j++) {
-    x1[j] = sin(t + j*3.14159/NUMX);
+    x1[j] = sin(2.0*3.14159*0.02*t + j*3.14159/NUMX);
   }
 }
 

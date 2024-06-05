@@ -20,7 +20,7 @@
 // set by data thread, read by display thread
 // access controlled via mutex
 #define NUMX 200
-extern double* x;  // data buffer
+extern char* x;  // data buffer
 extern HANDLE xMutex; // mutex to control access to data
 
 // pause flag
