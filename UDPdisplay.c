@@ -152,51 +152,37 @@ void print_double(char* buf, char* dispName, int width, int precision,
                   double lowLimit, double lowWarn,
                   double highLimit, double highWarn) {
   double val = *( (double*) buf);
-  // calc color based on degree into limit
-  double wf = 0.2; // fraction of color to jump to at warning level
-  const int LR = 0;  // values at full low limit
-  const int LG = 80;
-  const int LB = 133;
-  const int HR = 152;
-  const int HG = 58;
-  const int HB = 18;
-  
-  // don't color between limits
-  if (val > lowWarn && val < highWarn) {
-    //printf_s("%s= %*.*f  ", dispName, width, precision, val);
-    iBuf += sprintf_s(screenBuf+iBuf, NBUF, "%s= %*.*f  ", 
-      dispName, width, precision, val);
-    return;
-  }
-  int R = 0;
-  int G = 0;
-  int B = 0;
-  double cf = 0.0;
-  
-  double blink = 1.0;
-  BOOL isLimit = val < lowLimit || val > highLimit;
+
+  const char* colorHigh = ESC "[48;2;152;58;18m";
+  const char* colorLow = ESC "[48;2;0;80;133m";
+  const char* colorNone = ESC "[0m";
+  const char* indHighWarn = "HW";
+  const char* indHighLimit = "HL";
+  const char* indLowWarn = "LW";
+  const char* indLowLimit = "LL";
+  const char* indNone = "  ";
+
+  // constant color for warnings, blinking for limits
+  char* color = (char*) colorNone;
+  char* indicator = (char*) indNone;
   BOOL isBlink = (frameCount % (blinkOn+blinkOff)) >= blinkOn;
-  if (isLimit && isBlink) blink = 0.8;
-  
-  if (val < lowWarn) {
-    cf = wf + (1.0-wf)*(lowWarn - val)/(lowWarn - lowLimit);
-    cf = __min(cf, 1.0)*blink;
-    R = lround(LR*cf);
-    G = lround(LG*cf);
-    B = lround(LB*cf);
-  } else {
-    // must be > highWarn
-    cf = wf + (1.0-wf)*(val - highWarn)/(highLimit - highWarn);
-    cf = __min(cf, 1.0)*blink;
-    R = lround(HR*cf);
-    G = lround(HG*cf);
-    B = lround(HB*cf);
+  if ( val > lowLimit && val <= lowWarn) {
+    color = (char*) colorLow;
+    indicator = (char*) indLowWarn;
+  } else if ( val <= lowLimit) {
+    if (isBlink) color = (char*) colorLow;
+    indicator = (char*) indLowLimit;
+  } else if ( val < highLimit && val >= highWarn) {
+    color = (char*) colorHigh;
+    indicator = (char*) indHighWarn;
+  } else if ( val >= highLimit) {
+    if (isBlink) color = (char*) colorHigh;
+    indicator = (char*) indHighLimit;
   }
 
-  iBuf += sprintf_s(screenBuf+iBuf, NBUF, 
-    "%s= " ESC "[48;2;%d;%d;%dm" "%*.*f" ESC "[0m  " ,
-    dispName, R, G, B, width, precision, val);
-  
+  iBuf += sprintf_s(screenBuf+iBuf, NBUF-iBuf, 
+    "%s =%s%s%s%*.*f  ", dispName, color, indicator, colorNone,
+    width, precision, val);
 }
 
 // perform initial setup tasks
@@ -294,24 +280,6 @@ void wait_for_screen_update()
   }
   lastClock = nextClock;
 }
-
-// prints data to screen
-// TODO: user to overwrite this function with something useful
-// void print_data()
-// {
-//   iBuf = 0;
-//   static char dispName[10] = "         ";
-//   for (int j = 0; j < NUMX; j++) {  
-//     if (j % 5 == 0) {
-//       iBuf += sprintf_s(screenBuf+iBuf, NBUF, "\n");
-//     }
-//     sprintf_s(dispName, 10, " x[%3d]", j);
-//     print_double(((char*) x) + sizeof(double)*j, 
-//       dispName, 8, 4, -0.9, -0.2, 0.9, 0.2);
-//   }
-//   if (inCleanup) return; // in case someone started cleanup
-//   printf_s("%s", screenBuf);
-// }
 
 void print_data()
 {
