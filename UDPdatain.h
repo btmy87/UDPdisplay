@@ -6,8 +6,8 @@
 #include "UDPdisplay.h"
 
 // setups up socket and WinSock
-DWORD setup_socket();
+DWORD setup_socket(void);
 
 // new thread will be spawned with this function
 // to loop and continuously update new data
-void __cdecl handleUDPInput(void* in);
+DWORD get_data(void);

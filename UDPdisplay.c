@@ -14,8 +14,6 @@
 #include <winnt.h>
 #include <math.h>
 #include <time.h>
-#include <synchapi.h>
-#include <process.h>
 #include <conio.h>
 #include <winsock2.h>
 
@@ -28,9 +26,8 @@
 #include "UDPcommon.h"
 
 char* x = NULL;  // data buffer
-HANDLE xMutex; // mutex to control access to data
 
-DWORD dtDisplay = 200;
+clock_t dtDisplay = 200;
 BOOL paused = FALSE; // only write from input thread
 SOCKET sock = (SOCKET) SOCKET_ERROR;
 struct sockaddr_in srcaddr;
@@ -106,23 +103,22 @@ BOOL __stdcall cleanup(DWORD dwCtrlType)
 
   closesocket(sock);
   WSACleanup();  
-  CloseHandle(xMutex);
   if (x) free(x);
   if (screenBuf) free(screenBuf);
   return FALSE; // let any other handlers run
 }
 
-void __cdecl handleUserInput(void* in)
+// get input from the user
+DWORD get_user_input(void)
 {
-  (void) in; // unused parameter
-  while (TRUE) {
+  DWORD out = EXIT_SUCCESS;
+  if (_kbhit()) {
     int inp = _getch();
     if (inp == ' ') {
       paused = paused ? FALSE : TRUE; // toggle paused
     } else if (inp == 'x') {
       // exit program
-      GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
-      break;
+      out = EXIT_FAILURE;
     } else if (inp == '+') {
       // increase display update dt
       if (dtDisplay <= 480) {
@@ -143,7 +139,7 @@ void __cdecl handleUserInput(void* in)
       printf_s(ESC "[2J" ESC "[?25l");
     }
   }
-  _endthread();
+  return out;
 }
 
 
@@ -192,13 +188,6 @@ int initial_setup()
   // setup data buffer and mutex
   x = malloc(NUMX*sizeof(double));
   screenBuf = malloc(NBUF);
-  xMutex = CreateMutex(NULL, FALSE, NULL);
-  if (xMutex == NULL) {
-    if (x) free(x); x = NULL;
-    if (screenBuf) free(screenBuf); screenBuf = NULL;
-    reset_console();
-    return GetLastErrorAndPrint();
-  }
 
   // setup socket
   if (setup_socket() == SOCKET_ERROR) {
@@ -214,73 +203,37 @@ int initial_setup()
     return GetLastErrorAndPrint();
   }
 
-  // handle user input in a different thread
-  if (!_beginthread(&handleUserInput, 0, NULL)) {
-    reset_console();
-    printf("Error creating user input thread.\n");
-    cleanup(10);
-    return EXIT_FAILURE;
-  }
-
-  // handle UDP input in a different thread
-  if(!_beginthread(&handleUDPInput, 0, NULL)) {
-    reset_console();
-    printf("Error creating UDP input thread.\n");
-    cleanup(11);
-    return EXIT_FAILURE;
-  }
   lastRecv = clock();
   return EXIT_SUCCESS;
 }
 
-// wait for next full screen update
-// printing packet and status info so we know we're running
-void wait_for_screen_update()
+
+void print_header()
 {
-  // sleep until next update, but want to update
-  // display frequence faster so we appear responsive
-  static clock_t lastClock = 0;
-  static clock_t nextClock = 0;
   static int iRun = 0;
   const char runIndicator[] = {'|', '/', '-', '\\'};
 
-  // initialize clock
-  if (lastClock == 0) lastClock = clock();
-
-  nextClock = lastClock + dtDisplay;
-  while (TRUE) {
-    DWORD dtSleep = __max(0, (nextClock - clock()));
-    dtSleep = __min(dtSleep, 50);
-    Sleep(dtSleep);
-    frameCount++;
-    
-    // can print some stuff without the data mutex
-    // this helps us feel better that stuff is running
-    printf_s(ESC "[2;1H"); // set cursor position  
-    // print help message
-    printf_s("<space> pause, `x` quit, `+/-` display interval, `c` reset screen\n");
-
-    printf_s("Display updates every %4d ms\n", dtDisplay);
-    _localtime32_s( &recvTime, &recvClock);
-    asctime_s(recvTimeStr, 26, &recvTime);
-    printf_s("Last message from: %15s:%5d at %25s" 
-             "Time since last message: %8d ms\n",
-      inet_ntoa(srcaddr.sin_addr), ntohs(srcaddr.sin_port),
-      recvTimeStr, clock() - lastRecv);
-    if (paused) {
-      printf(PAUSE_COLOR PAUSE_MSG RESET_COLOR "\n");
-      continue;
-    }
+  printf_s(ESC "[2;1H"); // set cursor position  
+  // print help message
+  printf_s("<space> pause, `x` quit, `+/-` display interval, `c` reset screen\n");
+  printf_s("Display updates every %4d ms\n", dtDisplay);
+  _localtime32_s( &recvTime, &recvClock);
+  asctime_s(recvTimeStr, 26, &recvTime);
+  printf_s("Last message from: %15s:%5d at %25s" 
+           "Time since last message: %8d ms\n",
+    inet_ntoa(srcaddr.sin_addr), ntohs(srcaddr.sin_port),
+    recvTimeStr, clock() - lastRecv);
+  if (paused) {
+    printf(PAUSE_COLOR PAUSE_MSG RESET_COLOR "\n");
+  } else {
     iRun = (iRun + 1) % 4;
     printf(RUN_MSG " %c\n", runIndicator[iRun]);
-
-    if (clock() >= nextClock) break;
   }
-  lastClock = nextClock;
 }
 
 void print_data()
 {
+  frameCount++;
   iBuf = 0;
   for (int i = 0; i < NROWS*NCOLS; i++) {
     if (i % NCOLS == 0) {
@@ -297,32 +250,23 @@ int main(void)
 {
   if (initial_setup() != EXIT_SUCCESS) return EXIT_FAILURE;
 
+  clock_t lastFrame = clock();   // minor frame for polling input
+  clock_t nextFrame = lastFrame;
+  clock_t lastPrint = lastFrame; // longer frame for printing data
+  clock_t nextPrint = lastFrame;
   while (TRUE) {
-    if (inCleanup) break;
-
-    wait_for_screen_update();
-
-    // wait for data mutex
-    DWORD waitResult = WaitForSingleObject(xMutex, dtDisplay);    
-    if (waitResult == WAIT_TIMEOUT) continue; // no new data
-    if (waitResult == WAIT_ABANDONED || waitResult == WAIT_FAILED) {
-      reset_console();
-      if (!ReleaseMutex(xMutex)) GetLastErrorAndPrint();
-      printf_s("Error in UDP thread getting mutex, %d\n", waitResult);
-      GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
-      break;
-    } 
-        
-    print_data();
-
-    if (!ReleaseMutex(xMutex)) {
-      reset_console();
-      printf_s("Error releasing mutex in display thread.\n");
-      GetLastErrorAndPrint();
-      GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0);
-      break;
-    }
-    
+    DWORD nSleep = __max(0, (nextFrame - clock()));
+    Sleep(nSleep);
+    lastFrame = nextFrame;
+    nextFrame = lastFrame + 50;
+    if (get_user_input()) break;
+    if (get_data()) break;
+    print_header();
+    if (clock() >= nextPrint) {
+      if (!paused) print_data();
+      lastPrint = nextPrint;
+      nextPrint = lastPrint + dtDisplay;
+    }   
   }
   if (!inCleanup) cleanup(7);
   return 0;
