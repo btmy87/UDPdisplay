@@ -202,6 +202,8 @@ void print_data()
       iBuf += sprintf_s(screenBuf+iBuf, NBUF-iBuf, "\n");
     }
     if (packet[i].type == UDP_DOUBLE) print_double(x, &packet[i]);
+    if (packet[i].type == UDP_INT) print_i32(x, &packet[i]);
+    if (packet[i].type == UDP_UINT) print_u32(x, &packet[i]);
     
   }
   if (inCleanup) return; // in case someone started cleanup

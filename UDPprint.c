@@ -40,8 +40,8 @@ void print_double(char* buf, udp_packet_item* pdef) {
   }
 
   iBuf += sprintf_s(screenBuf+iBuf, NBUF-iBuf, 
-    "%s =%s%s%s%*.*f  ", pdef->name, color, indicator, colorNone,
-    11-pdef->precision, pdef->precision, val);
+    "%15s =%s%s%s%11.*f  ", pdef->name, color, indicator, colorNone,
+    pdef->precision, val);
 }
 
 void print_float(char* buf, udp_packet_item* pdef) 
@@ -56,23 +56,23 @@ void print_i32(char* buf, udp_packet_item* pdef)
 {
   int val = *( (int*) (buf + pdef->start_byte));
   iBuf += sprintf_s(screenBuf+iBuf, NBUF-iBuf,
-    "%15s =   %10d  ", pdef->name, val);
+    "%15s = %12d  ", pdef->name, val);
 }
 void print_u32(char* buf, udp_packet_item* pdef)
 {
   int val = *( (unsigned int*) (buf + pdef->start_byte));
   iBuf += sprintf_s(screenBuf+iBuf, NBUF-iBuf,
-    "%15s =   %8x  ", pdef->name, val);
+    "%15s =   0x%08x  ", pdef->name, val);
 }
 void print_u16(char* buf, udp_packet_item* pdef)
 {
   int val = *( (unsigned short*) (buf + pdef->start_byte));
   iBuf += sprintf_s(screenBuf+iBuf, NBUF-iBuf,
-    "%15s =   %4x      ", pdef->name, val);
+    "%15s =   0x%04x      ", pdef->name, val);
 }
 void print_u8(char* buf, udp_packet_item* pdef) 
 {
   int val = *( (unsigned char*) (buf + pdef->start_byte));
   iBuf += sprintf_s(screenBuf+iBuf, NBUF-iBuf,
-    "%15s =   %2x        ", pdef->name, val);
+    "%15s =   0x%02x        ", pdef->name, val);
 }

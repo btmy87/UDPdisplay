@@ -1,6 +1,6 @@
 // define structure used in print data
 
-enum udp_item_type {UDP_DOUBLE, UDP_INT, UDP_SHORT, UDP_TIME, UDP_NONE};
+enum udp_item_type {UDP_DOUBLE, UDP_INT, UDP_UINT, UDP_SHORT, UDP_TIME, UDP_NONE};
 typedef struct udp_packet_item {
   char name[16];
   double lowLimit;
