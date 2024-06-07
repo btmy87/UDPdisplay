@@ -20,6 +20,7 @@
 #include "UDPdisplay.h"
 #include "UDPdatain.h"
 #include "packetdef.h"
+#include "UDPprint.h"
 
 #pragma comment(lib, "Ws2_32.lib")
 
@@ -37,16 +38,12 @@ struct tm recvTime;
 char recvTimeStr[26] = "                         ";
 clock_t lastRecv = 0;
 size_t frameCount = 0;
-const size_t blinkOn = 1;
-const size_t blinkOff = 1;
 
 #define PAUSE_MSG "!!!!!!!!!!!!!!!!!!!! PAUSED  !!!!!!!!!!!!!!!!!!!!!"
 #define RUN_MSG   "-------------------- RUNNING ---------------------"
-#define ESC "\x1b"
 #define PAUSE_COLOR "\x1b[41m"
 #define RESET_COLOR "\x1b[0m"
 
-#define NBUF 16384
 char* screenBuf = NULL;
 int iBuf = 0; // counter for tracking our location in buffer
 BOOL inCleanup = FALSE;
@@ -143,41 +140,6 @@ DWORD get_user_input(void)
 }
 
 
-
-void print_double(char* buf, udp_packet_item* pdef) {
-  double val = *( (double*) (buf + pdef->start_byte));
-
-  const char* colorHigh = ESC "[48;2;152;58;18m";
-  const char* colorLow = ESC "[48;2;0;80;133m";
-  const char* colorNone = ESC "[0m";
-  const char* indHighWarn = "HW";
-  const char* indHighLimit = "HL";
-  const char* indLowWarn = "LW";
-  const char* indLowLimit = "LL";
-  const char* indNone = "  ";
-
-  // constant color for warnings, blinking for limits
-  char* color = (char*) colorNone;
-  char* indicator = (char*) indNone;
-  BOOL isBlink = (frameCount % (blinkOn+blinkOff)) >= blinkOn;
-  if ( val > pdef->lowLimit && val <= pdef->lowWarn) {
-    color = (char*) colorLow;
-    indicator = (char*) indLowWarn;
-  } else if ( val <= pdef->lowLimit) {
-    if (isBlink) color = (char*) colorLow;
-    indicator = (char*) indLowLimit;
-  } else if ( val < pdef->highLimit && val >= pdef->highWarn) {
-    color = (char*) colorHigh;
-    indicator = (char*) indHighWarn;
-  } else if ( val >= pdef->highLimit) {
-    if (isBlink) color = (char*) colorHigh;
-    indicator = (char*) indHighLimit;
-  }
-
-  iBuf += sprintf_s(screenBuf+iBuf, NBUF-iBuf, 
-    "%s =%s%s%s%*.*f  ", pdef->name, color, indicator, colorNone,
-    pdef->width, pdef->precision, val);
-}
 
 // perform initial setup tasks
 int initial_setup()

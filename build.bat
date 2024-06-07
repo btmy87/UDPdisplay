@@ -27,8 +27,11 @@ if "%DEBUG%" == "1" (
   set LINKOPTS=%LINKOPTS% /RELEASE
 )
 
+set OBJS=UDPdisplay.obj UDPcommon.obj UDPdatain.obj
+set OBJS=%OBJS% packetdef.obj UDPprint.obj
+
 @echo on
 cl %CLOPTS% *.c
 
-link %LINKOPTS% UDPdisplay.obj UDPcommon.obj UDPdatain.obj packetdef.obj
+link %LINKOPTS% %OBJS%
 link %LINKOPTS% UDPsource.obj UDPcommon.obj

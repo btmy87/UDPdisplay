@@ -7,6 +7,7 @@
 #include <windows.h>
 #define _WINSOCK_DEPRECATED_NO_WARNINGS 
 #include <winsock2.h>
+#include <time.h>
 
 // General program architecture
 // 3 threads
@@ -15,6 +16,7 @@
 // 3. User input - Reads user input
 // 
 // Data input and user input are generally stuck in blocking IO calls
+#define ESC "\x1b"
 
 // data buffer
 // set by data thread, read by display thread
@@ -51,3 +53,8 @@ extern BOOL inCleanup;
 // switches back to main screen buffer
 // needs to be called before any error message is printed
 void reset_console();
+
+extern size_t frameCount;
+extern char* screenBuf;
+extern int iBuf;
+#define NBUF 16384
