@@ -148,8 +148,8 @@ int initial_setup()
   if (!setup_console()) return GetLastErrorAndPrint();
   
   // setup data buffer and mutex
-  x = malloc(NUMX*sizeof(double));
-  screenBuf = malloc(NBUF);
+  x = calloc(NUMX*sizeof(double), sizeof(char));
+  screenBuf = calloc(NBUF, sizeof(char));
 
   // setup socket
   if (setup_socket() == SOCKET_ERROR) {
@@ -181,7 +181,8 @@ void print_header()
   printf_s("Display updates every %4d ms\n", dtDisplay);
   _localtime32_s( &recvTime, &recvClock);
   asctime_s(recvTimeStr, 26, &recvTime);
-  printf_s("Last message from: %15s:%5d at %25s" 
+  recvTimeStr[24] = ' '; // remove newline
+  printf_s("Last message from: %15s:%5d at %25s    " 
            "Time since last message: %8d ms\n",
     inet_ntoa(srcaddr.sin_addr), ntohs(srcaddr.sin_port),
     recvTimeStr, clock() - lastRecv);
@@ -208,6 +209,9 @@ void print_data()
   }
   if (inCleanup) return; // in case someone started cleanup
   printf_s("%s", screenBuf);
+  #ifdef _DEBUG
+    printf_s("\nBuffer used %6d of %6d bytes\n", iBuf, NBUF);
+  #endif
 }
 
 int main(void)
